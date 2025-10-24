@@ -124,7 +124,7 @@ const Dashboard = () => {
                 <Button 
                   variant="outline" 
                   className="w-full justify-start gap-3 hover:bg-primary/10 border-primary/30"
-                  onClick={() => toast({ title: "Coming soon!", description: "Performance tracking feature" })}
+                  onClick={() => navigate('/performance')}
                 >
                   <BookOpen className="w-5 h-5 text-primary" />
                   Track Performance
@@ -132,7 +132,7 @@ const Dashboard = () => {
                 <Button 
                   variant="outline" 
                   className="w-full justify-start gap-3 hover:bg-secondary/10 border-secondary/30"
-                  onClick={() => toast({ title: "Coming soon!", description: "Find mentors feature" })}
+                  onClick={() => navigate('/mentors')}
                 >
                   <Users className="w-5 h-5 text-secondary" />
                   Find Mentors
@@ -140,7 +140,7 @@ const Dashboard = () => {
                 <Button 
                   variant="outline" 
                   className="w-full justify-start gap-3 hover:bg-accent/10 border-accent/30"
-                  onClick={() => toast({ title: "Coming soon!", description: "Get support feature" })}
+                  onClick={() => navigate('/support')}
                 >
                   <Heart className="w-5 h-5 text-accent" />
                   Get Support
