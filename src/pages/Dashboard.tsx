@@ -25,14 +25,25 @@ const Dashboard = () => {
       return;
     }
 
+    console.log('Dashboard.checkUser - current user id:', user?.id);
+
+    const userId = (user?.id || '').split(':')[0];
+
     const { data, error } = await supabase
       .from('profiles')
       .select('*')
-      .eq('id', user.id)
+      .eq('id', userId)
       .single();
 
     if (error) {
-      console.error('Error fetching profile:', error);
+      console.error('Error fetching profile:', error, { userId: user?.id });
+      // If PostgREST returned a 406 due to Accept or malformed query, surface details in console.
+      // Keep UI behavior unchanged but show a toast for clarity.
+      toast({
+        title: 'Profile load failed',
+        description: error.message || 'Failed to load profile. Check console for details.',
+        variant: 'destructive',
+      });
     } else {
       setProfile(data);
     }
