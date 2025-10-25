@@ -65,3 +65,8 @@ All colors MUST be HSL.
     @apply bg-background text-foreground;
   }
 }
+
+/* small helpers for animated dots used in chat typing indicator */
+.dot-delay-0 { animation-delay: 0ms; }
+.dot-delay-150 { animation-delay: 150ms; }
+.dot-delay-300 { animation-delay: 300ms; }

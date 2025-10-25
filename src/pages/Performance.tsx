@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
@@ -23,6 +23,10 @@ const Performance = () => {
   const { toast } = useToast();
   const [records, setRecords] = useState<PerformanceRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analysis, setAnalysis] = useState<string | null>(null);
+  const [analysisMeta, setAnalysisMeta] = useState<Record<string, unknown> | null>(null);
+  const [autoAnalyzed, setAutoAnalyzed] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [formData, setFormData] = useState({
     subject: '',
@@ -31,17 +35,12 @@ const Performance = () => {
     notes: ''
   });
 
-  useEffect(() => {
-    checkAuth();
-    fetchRecords();
-  }, []);
-
-  const checkAuth = async () => {
+  const checkAuth = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) navigate('/auth');
-  };
+  }, [navigate]);
 
-  const fetchRecords = async () => {
+  const fetchRecords = useCallback(async () => {
     try {
       const { data, error } = await supabase
         .from('performance_records')
@@ -60,7 +59,14 @@ const Performance = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [toast]);
+
+  
+
+  useEffect(() => {
+    checkAuth();
+    fetchRecords();
+  }, [checkAuth, fetchRecords]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -99,6 +105,158 @@ const Performance = () => {
     }
   };
 
+  const analyzeMarks = useCallback(async () => {
+    if (records.length === 0) {
+      toast({
+        title: 'No records',
+        description: 'Add some performance records before analyzing',
+        variant: 'destructive'
+      });
+      return;
+    }
+
+  console.log('[Performance] analyzeMarks: starting');
+  setAnalyzing(true);
+  setAnalysis(null);
+
+    try {
+      // Build a readable message for the backend from the student's records
+      const lines = records.map(r =>
+        `${r.subject}: ${r.score}%${r.attendance_percentage ? ` (attendance ${r.attendance_percentage}%)` : ''}`
+      );
+
+      const message = `The student got:\n${lines.join('\n')}\n\nPlease provide an encouraging analysis, highlight strengths, and suggest improvements.`;
+
+      console.log('[Performance] analyzeMarks: payload', { message });
+
+      const res = await fetch('https://tshify.onrender.com/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message })
+      });
+
+      console.log('[Performance] analyzeMarks: fetch completed, status=', res.status, res.statusText, res.type);
+
+      const rawText = await res.text();
+      console.log('[Performance] analyzeMarks: raw response text=', rawText);
+
+      if (!res.ok) {
+        // include raw text to help debugging
+        throw new Error(`Server responded with ${res.status}: ${rawText}`);
+      }
+
+      let parsed: Record<string, unknown> | null = null;
+      try {
+        parsed = JSON.parse(rawText);
+      } catch (e) {
+        console.warn('[Performance] analyzeMarks: response is not valid JSON, showing raw text');
+        setAnalysis(rawText);
+        setAnalysisMeta(null);
+        parsed = null;
+      }
+
+      if (parsed) {
+        // Prefer common fields: message, response
+        const textField = (parsed['message'] ?? parsed['response']) as string | undefined;
+        const text = typeof textField === 'string' ? textField : JSON.stringify(parsed);
+        setAnalysis(text);
+        // Keep the whole parsed object for structured display
+        setAnalysisMeta(parsed);
+        // Also persist this conversation into chat_messages so the ChatInterface can show it
+        (async () => {
+          try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
+            const userId = (user.id || '').split(':')[0];
+            // Insert the user message and assistant message into the chat_messages table
+            await supabase.from('chat_messages').insert([
+              { student_id: userId, role: 'user', content: message },
+              { student_id: userId, role: 'assistant', content: text }
+            ]);
+          } catch (dbErr) {
+            console.warn('[Performance] failed to persist chat messages:', dbErr);
+          }
+        })();
+      }
+    } catch (error) {
+      console.error('[Performance] Analysis error:', error);
+      const errMsg = error instanceof Error ? error.message : String(error);
+      toast({
+        title: 'Error',
+        description: errMsg || 'Failed to analyze marks',
+        variant: 'destructive'
+      });
+    } finally {
+      setAnalyzing(false);
+    }
+  }, [records, toast]);
+
+  // Auto-run analysis once records are loaded on page launch
+  useEffect(() => {
+    if (!loading && records.length > 0 && !autoAnalyzed) {
+      console.log('[Performance] Auto-running analysis on page load: records found=', records.length);
+      analyzeMarks();
+      setAutoAnalyzed(true);
+    }
+  }, [loading, records, autoAnalyzed, analyzeMarks]);
+
+  // Simple lightweight formatter for AI analysis text
+  const renderFormattedAnalysis = (text: string) => {
+    const lines = text.split(/\r?\n/);
+    const elems: React.ReactNode[] = [];
+    let i = 0;
+
+    while (i < lines.length) {
+      const line = lines[i].trimEnd();
+      // list item (markdown-like) - handles '* ', '- ', '+ '
+      // detect markdown-like list items; also support unicode bullets • · and leading whitespace
+      if (/^\s*([*+\-\u2022\u00B7])\s+/.test(lines[i])) {
+        const items: string[] = [];
+        while (i < lines.length && /^\s*([*+\-\u2022\u00B7])\s+/.test(lines[i])) {
+          // remove the leading bullet marker and any surrounding whitespace
+          items.push(lines[i].replace(/^\s*([*+\-\u2022\u00B7])\s+/, '').trim());
+          i++;
+        }
+        elems.push(
+          <ul className="list-disc ml-6" key={i}>
+            {items.map((it, idx) => (
+              <li key={idx} className="mb-1">{it}</li>
+            ))}
+          </ul>
+        );
+        continue;
+      }
+
+      // blank line -> paragraph separator
+      if (line.trim() === '') {
+        i++;
+        continue;
+      }
+
+      // collect paragraph lines until blank or list
+      const paraLines: string[] = [];
+      while (i < lines.length && lines[i].trim() !== '' && !/^([*\-+])\s+/.test(lines[i].trim())) {
+        paraLines.push(lines[i]);
+        i++;
+      }
+      const paragraph = paraLines.join(' ').trim();
+      elems.push(
+        <p key={i} className="mb-2 text-sm leading-relaxed" dangerouslySetInnerHTML={{ __html: escapeHtml(paragraph).replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\*(.*?)\*/g, '<em>$1</em>') }} />
+      );
+    }
+
+    return <div>{elems}</div>;
+  };
+
+  const escapeHtml = (unsafe: string) => {
+    return unsafe
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  };
+
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-50">
@@ -115,10 +273,12 @@ const Performance = () => {
                 <p className="text-sm text-muted-foreground">Monitor your academic progress</p>
               </div>
             </div>
-            <Button onClick={() => setShowForm(!showForm)}>
-              <Plus className="w-4 h-4 mr-2" />
-              Add Record
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button onClick={analyzeMarks} disabled={analyzing || records.length === 0}>
+                {analyzing ? 'Analyzing...' : 'Analyze Marks'}
+              </Button>
+              
+            </div>
           </div>
         </div>
       </header>
@@ -227,6 +387,34 @@ const Performance = () => {
             )}
           </CardContent>
         </Card>
+
+        {analysis && (
+          <Card>
+            <CardHeader>
+              <CardTitle>AI Analysis</CardTitle>
+            </CardHeader>
+            <CardContent>
+                      <div className="prose max-w-none">
+                        {renderFormattedAnalysis(analysis)}
+                      </div>
+            </CardContent>
+          </Card>
+        )}
+        
+      </div>
+      <div className="sticky bottom-0 z-50 bg-background/80 border-t border-border p-4">
+        <div className="container mx-auto px-4">
+          <div className="flex justify-end">
+            <Button onClick={() => {
+              // build marks message and navigate with state so chat can pick it up
+              const lines = records.map(r => `${r.subject}: ${r.score}%${r.attendance_percentage ? ` (attendance ${r.attendance_percentage}%)` : ''}`);
+              const marksMessage = `The student got:\n${lines.join('\n')}`;
+              navigate('/dashboard', { state: { fromPerformance: true, marksMessage, analysis: analysis || null } });
+            }} className="bg-primary hover:bg-primary/90">
+              Go to Support Chat
+            </Button>
+          </div>
+        </div>
       </div>
     </div>
   );

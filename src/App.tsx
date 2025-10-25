@@ -7,6 +7,7 @@ import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
 import Performance from "./pages/Performance";
+import AdminDashboard from "./pages/AdminDashboard";
 import Mentors from "./pages/Mentors";
 import Support from "./pages/Support";
 import NotFound from "./pages/NotFound";
@@ -23,6 +24,7 @@ const App = () => (
           <Route path="/" element={<Index />} />
           <Route path="/auth" element={<Auth />} />
           <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/admin" element={<AdminDashboard />} />
           <Route path="/performance" element={<Performance />} />
           <Route path="/mentors" element={<Mentors />} />
           <Route path="/support" element={<Support />} />
